@@ -52,8 +52,10 @@ func setupLossHTTP(t *testing.T) (*gin.Engine, *gorm.DB, map[string]string, uint
 	db.Create(&sku)
 	mgr := model.User{Username: "mgr", PasswordHash: "x", Name: "店长", Role: constants.RoleStoreManager, StoreID: &st1.ID}
 	adm := model.User{Username: "adm", PasswordHash: "x", Name: "管理员", Role: constants.RoleAdmin}
+	hq := model.User{Username: "hq", PasswordHash: "x", Name: "总部", Role: constants.RoleHQ}
 	db.Create(&mgr)
 	db.Create(&adm)
+	db.Create(&hq)
 	db.Create(&model.StoreInventory{StoreID: st1.ID, SKUID: sku.ID, Quantity: 5})
 	db.Create(&model.StoreInventory{StoreID: st2.ID, SKUID: sku.ID, Quantity: 100})
 	db.Create(&model.LossOrder{StoreID: st1.ID, SKUID: sku.ID, Quantity: 1, Reason: "破损", Status: constants.LossPending, ApplicantID: &mgr.ID})
@@ -76,7 +78,7 @@ func setupLossHTTP(t *testing.T) (*gin.Engine, *gorm.DB, map[string]string, uint
 	registerLossOrderRoutes(v1, lossHandler, middleware.AuthRequired(cfg), middleware.RateLimit(cfg))
 
 	tokens := map[string]string{}
-	for name, uid := range map[string]uint{"mgr": mgr.ID, "adm": adm.ID} {
+	for name, uid := range map[string]uint{"mgr": mgr.ID, "adm": adm.ID, "hq": hq.ID} {
 		u := model.User{}
 		db.First(&u, uid)
 		tok, err := util.GenerateToken(cfg.JWTSecret, 2, u.ID, u.Username, u.Role, u.StoreID)
@@ -195,6 +197,101 @@ func TestLossHTTPManagerCannotApprove(t *testing.T) {
 	w := doLossRequest(t, engine, http.MethodPut, "/api/v1/loss-orders/1/approve", tokens["mgr"], nil)
 	if w.Code != http.StatusForbidden {
 		t.Fatalf("manager approve status=%d want 403", w.Code)
+	}
+}
+
+// 店长无驳回权限。
+func TestLossHTTPManagerCannotReject(t *testing.T) {
+	engine, _, tokens, _, _ := setupLossHTTP(t)
+	w := doLossRequest(t, engine, http.MethodPut, "/api/v1/loss-orders/1/reject", tokens["mgr"], map[string]any{"reject_reason": "原因"})
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("manager reject status=%d want 403", w.Code)
+	}
+}
+
+// 总部不能提交报损单，仅可审批。
+func TestLossHTTPHQCannotCreate(t *testing.T) {
+	engine, _, tokens, st1, _ := setupLossHTTP(t)
+	w := doLossRequest(t, engine, http.MethodPost, "/api/v1/loss-orders", tokens["hq"], map[string]any{
+		"store_id": st1, "sku_id": 1, "quantity": 1, "reason": "破损",
+	})
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("hq create status=%d want 403 body=%s", w.Code, w.Body.String())
+	}
+}
+
+// 总部列表可见全部门店，并可通过审批（扣减库存）与驳回处理单据。
+func TestLossHTTPHQListScopeAndReview(t *testing.T) {
+	engine, db, tokens, st1, _ := setupLossHTTP(t)
+
+	// 总部看全部门店。
+	w := doLossRequest(t, engine, http.MethodGet, "/api/v1/loss-orders", tokens["hq"], nil)
+	if w.Code != http.StatusOK {
+		t.Fatalf("hq list status=%d body=%s", w.Code, w.Body.String())
+	}
+	if list := lossRespList(t, w); len(list) != 2 {
+		t.Fatalf("hq sees %d orders, want 2", len(list))
+	}
+	// 总部可审批通过，库存 5 -> 4。
+	w = doLossRequest(t, engine, http.MethodPut, "/api/v1/loss-orders/1/approve", tokens["hq"], nil)
+	if w.Code != http.StatusOK {
+		t.Fatalf("hq approve status=%d body=%s", w.Code, w.Body.String())
+	}
+	var inv model.StoreInventory
+	db.Where("store_id = ? AND sku_id = ?", st1, 1).First(&inv)
+	if inv.Quantity != 4 {
+		t.Fatalf("quantity after hq approve = %d, want 4", inv.Quantity)
+	}
+	// 总部带原因驳回成功。
+	w = doLossRequest(t, engine, http.MethodPut, "/api/v1/loss-orders/2/reject", tokens["hq"], map[string]any{"reject_reason": "材料不全"})
+	if w.Code != http.StatusOK {
+		t.Fatalf("hq reject status=%d body=%s", w.Code, w.Body.String())
+	}
+}
+
+// 列表状态筛选：总部按 approved/pending/rejected 过滤。
+func TestLossHTTPListFilterByStatus(t *testing.T) {
+	engine, _, tokens, _, _ := setupLossHTTP(t)
+	// 先通过单据 1、驳回单据 2。
+	if w := doLossRequest(t, engine, http.MethodPut, "/api/v1/loss-orders/1/approve", tokens["adm"], nil); w.Code != http.StatusOK {
+		t.Fatalf("approve setup status=%d", w.Code)
+	}
+	if w := doLossRequest(t, engine, http.MethodPut, "/api/v1/loss-orders/2/reject", tokens["adm"], map[string]any{"reject_reason": "依据不足"}); w.Code != http.StatusOK {
+		t.Fatalf("reject setup status=%d", w.Code)
+	}
+	cases := []struct {
+		status string
+		want   int
+	}{
+		{"approved", 1},
+		{"rejected", 1},
+		{"pending", 0},
+	}
+	for _, tc := range cases {
+		w := doLossRequest(t, engine, http.MethodGet, "/api/v1/loss-orders?status="+tc.status, tokens["adm"], nil)
+		if w.Code != http.StatusOK {
+			t.Fatalf("filter %s status=%d", tc.status, w.Code)
+		}
+		var env struct {
+			Data struct {
+				Total int64 `json:"total"`
+			} `json:"data"`
+		}
+		if err := json.Unmarshal(w.Body.Bytes(), &env); err != nil {
+			t.Fatalf("decode: %v", err)
+		}
+		if env.Data.Total != int64(tc.want) {
+			t.Fatalf("status=%s total=%d want %d", tc.status, env.Data.Total, tc.want)
+		}
+	}
+}
+
+// 未登录访问被拒。
+func TestLossHTTPUnauthorized(t *testing.T) {
+	engine, _, _, _, _ := setupLossHTTP(t)
+	w := doLossRequest(t, engine, http.MethodGet, "/api/v1/loss-orders", "", nil)
+	if w.Code != http.StatusUnauthorized {
+		t.Fatalf("no-token list status=%d want 401", w.Code)
 	}
 }
 
