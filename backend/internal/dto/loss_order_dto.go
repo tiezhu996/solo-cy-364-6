@@ -2,9 +2,9 @@ package dto
 
 import "github.com/ld/storeinventory/internal/constants"
 
-// LossOrderCreateRequest 报损单创建请求。
+// LossOrderCreateRequest 报损单创建请求。门店由后端依据登录店长绑定门店确定，前端无需传 store_id。
 type LossOrderCreateRequest struct {
-	StoreID  uint   `json:"store_id" binding:"required"`
+	StoreID  uint   `json:"store_id" binding:"omitempty"`
 	SKUID    uint   `json:"sku_id" binding:"required"`
 	Quantity int    `json:"quantity" binding:"required,min=1"`
 	Reason   string `json:"reason" binding:"required,max=255"`

@@ -73,8 +73,7 @@ func setupLossHTTP(t *testing.T) (*gin.Engine, *gorm.DB, map[string]string, uint
 	engine := gin.New()
 	engine.Use(middleware.ErrorHandler())
 	v1 := engine.Group("/api/v1")
-	managerRoles := []constants.UserRole{constants.RoleAdmin, constants.RoleHQ, constants.RoleStoreManager}
-	registerLossOrderRoutes(v1, lossHandler, middleware.AuthRequired(cfg), managerRoles, middleware.RateLimit(cfg))
+	registerLossOrderRoutes(v1, lossHandler, middleware.AuthRequired(cfg), middleware.RateLimit(cfg))
 
 	tokens := map[string]string{}
 	for name, uid := range map[string]uint{"mgr": mgr.ID, "adm": adm.ID} {
@@ -156,6 +155,37 @@ func TestLossHTTPManagerCannotCreateForOtherStore(t *testing.T) {
 	})
 	if w.Code != http.StatusForbidden {
 		t.Fatalf("cross-store create status=%d want 403 body=%s", w.Code, w.Body.String())
+	}
+}
+
+// 店长可以为自己门店提交报损单（无需传 store_id，后端按登录态归属）。
+func TestLossHTTPManagerCreateOwnStore(t *testing.T) {
+	engine, _, tokens, st1, _ := setupLossHTTP(t)
+	w := doLossRequest(t, engine, http.MethodPost, "/api/v1/loss-orders", tokens["mgr"], map[string]any{
+		"sku_id": 1, "quantity": 1, "reason": "临期破损",
+	})
+	if w.Code != http.StatusOK {
+		t.Fatalf("own-store create status=%d want 200 body=%s", w.Code, w.Body.String())
+	}
+	var env struct {
+		Data map[string]any `json:"data"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &env); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if int(env.Data["store_id"].(float64)) != int(st1) {
+		t.Fatalf("created order store_id = %v, want %d", env.Data["store_id"], st1)
+	}
+}
+
+// 总部/管理员不能提交报损单，仅可审批。
+func TestLossHTTPAdminCannotCreate(t *testing.T) {
+	engine, _, tokens, st1, _ := setupLossHTTP(t)
+	w := doLossRequest(t, engine, http.MethodPost, "/api/v1/loss-orders", tokens["adm"], map[string]any{
+		"store_id": st1, "sku_id": 1, "quantity": 1, "reason": "破损",
+	})
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("admin create status=%d want 403 body=%s", w.Code, w.Body.String())
 	}
 }
 

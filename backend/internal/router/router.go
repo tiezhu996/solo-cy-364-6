@@ -147,5 +147,5 @@ func (r *Router) registerV1(v1 *gin.RouterGroup) {
 	registerInventoryRoutes(v1, invHandler, auth, managerRoles)
 	registerTransferRoutes(v1, transferHandler, auth, managerRoles, authLimiter)
 	registerStockRecordRoutes(v1, recordHandler, auth, managerRoles)
-	registerLossOrderRoutes(v1, lossHandler, auth, managerRoles, authLimiter)
+	registerLossOrderRoutes(v1, lossHandler, auth, authLimiter)
 }

@@ -10,7 +10,8 @@ export function getLossOrder(id: number): Promise<LossOrder> {
   return request.get(`/loss-orders/${id}`)
 }
 
-export function createLossOrder(data: { store_id: number; sku_id: number; quantity: number; reason: string }): Promise<LossOrder> {
+// 门店由后端依据登录店长绑定门店确定，前端无需也不能指定 store_id。
+export function createLossOrder(data: { sku_id: number; quantity: number; reason: string }): Promise<LossOrder> {
   return request.post('/loss-orders', data)
 }
 

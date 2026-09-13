@@ -17,7 +17,8 @@
         </el-select>
         <el-button type="primary" @click="load">查询</el-button>
         <div class="spacer"></div>
-        <el-button type="primary" @click="openCreate">提交报损</el-button>
+        <!-- 提交入口仅店长可见；总部/管理员只保留审批，不开放提交 -->
+        <el-button v-if="isManager" type="primary" @click="openCreate">提交报损</el-button>
       </div>
 
       <el-table :data="list" v-loading="loading" border stripe>
@@ -47,21 +48,12 @@
         </el-table-column>
         <el-table-column label="操作" width="170" fixed="right">
           <template #default="{ row }">
-            <el-button
-              v-if="isApprover && canApprove(row)"
-              link
-              type="success"
-              size="small"
-              @click="doApprove(row)"
-            >通过</el-button>
-            <el-button
-              v-if="isApprover && canReject(row)"
-              link
-              type="danger"
-              size="small"
-              @click="openReject(row)"
-            >驳回</el-button>
-            <span v-if="!isApprover || !canApprove(row)" class="muted">-</span>
+            <template v-if="isApprover">
+              <el-button v-if="canApprove(row)" link type="success" size="small" @click="doApprove(row)">通过</el-button>
+              <el-button v-if="canReject(row)" link type="danger" size="small" @click="openReject(row)">驳回</el-button>
+              <span v-if="!canApprove(row) && !canReject(row)" class="muted">-</span>
+            </template>
+            <span v-else class="muted">-</span>
           </template>
         </el-table-column>
       </el-table>
@@ -75,16 +67,20 @@
       />
     </el-card>
 
-    <el-dialog v-model="createVisible" title="提交库存报损单" width="480px">
+    <!-- 仅店长提交；门店固定为本人所属门店，不可选择 -->
+    <el-dialog v-if="isManager" v-model="createVisible" title="提交库存报损单" width="480px">
       <el-form ref="createFormRef" :model="form" :rules="rules" label-width="90px">
-        <el-form-item label="门店" prop="store_id">
-          <el-select v-model="form.store_id" :disabled="!isApprover" style="width: 100%">
-            <el-option v-for="s in stores" :key="s.id" :label="s.name" :value="s.id" />
-          </el-select>
+        <el-form-item label="门店">
+          <el-input :model-value="ownStoreName" disabled />
         </el-form-item>
         <el-form-item label="商品" prop="sku_id">
-          <el-select v-model="form.sku_id" filterable style="width: 100%">
-            <el-option v-for="s in skus" :key="s.id" :label="`${s.name}（${s.code}）`" :value="s.id" />
+          <el-select v-model="form.sku_id" filterable placeholder="选择本店有库存的商品" style="width: 100%">
+            <el-option
+              v-for="inv in ownInventories"
+              :key="inv.sku_id"
+              :label="`${inv.sku?.name || inv.sku_id}（${inv.sku?.code || ''}）库存 ${inv.quantity} ${inv.sku?.unit || ''}`"
+              :value="inv.sku_id"
+            />
           </el-select>
         </el-form-item>
         <el-form-item label="报损数量" prop="quantity">
@@ -120,20 +116,22 @@ import { ElMessage, ElMessageBox, type FormInstance, type FormRules } from 'elem
 import LossOrderStatusBadge from '@/components/common/LossOrderStatusBadge.vue'
 import { listLossOrders, createLossOrder, approveLossOrder, rejectLossOrder } from '@/api/lossOrder'
 import { listAllStores } from '@/api/store'
-import { listSkus } from '@/api/sku'
+import { listInventories } from '@/api/storeInventory'
 import { LOSS_ORDER_STATUS_OPTIONS, LossOrderStatus, canLossTransition, type LossOrderStatusValue } from '@/constants/lossOrder'
 import { useAuthStore } from '@/stores/authStore'
 import { formatDateTime } from '@/utils/dateFormat'
-import type { Store, SKU, LossOrder } from '@/types'
+import type { Store, StoreInventory, LossOrder } from '@/types'
 
 const auth = useAuthStore()
 const isApprover = computed(() => auth.role === 'admin' || auth.role === 'hq')
+const isManager = computed(() => auth.role === 'store_manager')
 // 店长只能提交/查看本店单据
 const ownStoreId = computed<number | null>(() => auth.user?.store_id ?? null)
+const ownStoreName = computed(() => ownInventories.value[0]?.store?.name || (ownStoreId.value ? `#${ownStoreId.value}` : '-'))
 
 const list = ref<LossOrder[]>([])
 const stores = ref<Store[]>([])
-const skus = ref<SKU[]>([])
+const ownInventories = ref<StoreInventory[]>([])
 const total = ref(0)
 const page = ref(1)
 const pageSize = ref(10)
@@ -146,11 +144,10 @@ const rejectVisible = ref(false)
 const createFormRef = ref<FormInstance>()
 const rejectFormRef = ref<FormInstance>()
 
-const form = reactive({ store_id: 0, sku_id: 0, quantity: 1, reason: '' })
+const form = reactive({ sku_id: 0, quantity: 1, reason: '' })
 const rejectForm = reactive({ id: 0, reject_reason: '' })
 
 const rules: FormRules = {
-  store_id: [{ required: true, message: '请选择门店', trigger: 'change' }],
   sku_id: [{ required: true, message: '请选择商品', trigger: 'change' }],
   quantity: [{ required: true, message: '报损数量需大于 0', trigger: 'change' }],
   reason: [{ required: true, message: '请填写报损原因', trigger: 'blur' }]
@@ -159,6 +156,7 @@ const rejectRules: FormRules = {
   reject_reason: [{ required: true, message: '驳回必须填写原因', trigger: 'blur' }]
 }
 
+// 列表查询独立执行，不依赖商品/门店字典加载结果，保证页面始终能展示单据。
 async function load() {
   loading.value = true
   try {
@@ -167,7 +165,7 @@ async function load() {
       page_size: pageSize.value
     }
     if (statusFilter.value) params.status = statusFilter.value
-    // 店长后端强制按本店过滤，前端同样固定门店，避免越权传参。
+    // 店长后端强制按本店过滤，前端同样固定门店；总部/管理员可按门店筛选或看全部。
     const filterStore = isApprover.value ? storeId.value : ownStoreId.value ?? undefined
     if (filterStore) params.store_id = filterStore
     const res = await listLossOrders(params)
@@ -179,8 +177,7 @@ async function load() {
 }
 
 function openCreate() {
-  form.store_id = isApprover.value ? (storeId.value || stores.value[0]?.id || 0) : (ownStoreId.value || 0)
-  form.sku_id = skus.value[0]?.id || 0
+  form.sku_id = ownInventories.value[0]?.sku_id || 0
   form.quantity = 1
   form.reason = ''
   createVisible.value = true
@@ -192,7 +189,8 @@ async function onCreate() {
     if (!valid) return
     saving.value = true
     try {
-      await createLossOrder({ store_id: form.store_id, sku_id: form.sku_id, quantity: form.quantity, reason: form.reason })
+      // 门店由后端依据登录店长绑定门店确定，前端不传 store_id。
+      await createLossOrder({ sku_id: form.sku_id, quantity: form.quantity, reason: form.reason })
       ElMessage.success('报损单已提交，等待审核')
       createVisible.value = false
       await load()
@@ -253,11 +251,27 @@ async function onReject() {
 }
 
 onMounted(async () => {
-  if (!auth.user) await auth.fetchMe()
-  stores.value = await listAllStores()
-  const res = await listSkus({ page: 1, page_size: 500 })
-  skus.value = res.list
+  if (!auth.user) {
+    try {
+      await auth.fetchMe()
+    } catch {
+      /* 未登录由路由守卫处理 */
+    }
+  }
+  // 先加载单据列表，保证店长打开页面即可看到本店单据。
   await load()
+  // 字典/本店库存加载失败不影响列表展示。
+  try {
+    if (isApprover.value) {
+      stores.value = await listAllStores()
+    } else if (isManager.value && ownStoreId.value) {
+      // 仅读取本店实际库存作为可报损商品来源，避免一次性拉取全量 SKU 导致分页超限报错。
+      const res = await listInventories({ page: 1, page_size: 200, store_id: ownStoreId.value })
+      ownInventories.value = res.list
+    }
+  } catch {
+    /* 字典加载失败不阻塞列表 */
+  }
 })
 </script>
 

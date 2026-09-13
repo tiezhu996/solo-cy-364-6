@@ -32,5 +32,6 @@ const (
 	MsgLossConflict           = "报损单已处理，请勿重复审批"
 	MsgLossRejectReasonNeeded = "驳回必须填写驳回原因"
 	MsgLossStoreMismatch      = "店长只能提交本店的报损单"
+	MsgLossSubmitManagerOnly  = "报损单仅可由店长提交，总部/管理员负责审批"
 	MsgLossReasonNeeded       = "报损原因不能为空"
 )

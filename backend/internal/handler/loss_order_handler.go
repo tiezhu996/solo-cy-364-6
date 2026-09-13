@@ -24,10 +24,16 @@ func NewLossOrderHandler(lossSvc service.LossOrderService) *LossOrderHandler {
 }
 
 // Create 店长提交本店商品的报损数量和原因，单据进入待审核。
+// 提交入口仅对店长开放（路由层已限定 store_manager），门店一律取自登录态，防止越权为他店提交。
 func (h *LossOrderHandler) Create(c *gin.Context) {
 	claims, err := middleware.CurrentUser(c)
 	if err != nil {
 		c.Error(util.Unauthorized(constants.MsgUnauthorized, err))
+		return
+	}
+	if claims.Role != constants.RoleStoreManager {
+		c.Error(util.Forbidden(constants.MsgLossSubmitManagerOnly,
+			fmt.Errorf("role[%s] is not allowed to create loss order", claims.Role)))
 		return
 	}
 	var req dto.LossOrderCreateRequest
@@ -35,16 +41,17 @@ func (h *LossOrderHandler) Create(c *gin.Context) {
 		c.Error(util.Validation(constants.MsgInvalidRequest, err))
 		return
 	}
-	// 店长只能提交本店的报损单；总部/管理员可代任意门店提交。
-	storeID := req.StoreID
-	if claims.Role == constants.RoleStoreManager {
-		if claims.StoreID == nil || *claims.StoreID != storeID {
-			c.Error(util.Forbidden(constants.MsgLossStoreMismatch,
-				fmt.Errorf("role[%s] create loss for store[%d], own store[%v]", claims.Role, storeID, claims.StoreID)))
-			return
-		}
+	// 门店以登录用户绑定门店为准；店长未绑定门店或传入他店门店均拒绝。
+	if claims.StoreID == nil {
+		c.Error(util.Forbidden(constants.MsgLossStoreMismatch, fmt.Errorf("role[%s] has no bound store", claims.Role)))
+		return
 	}
-	order, err := h.lossSvc.Create(storeID, req.SKUID, req.Quantity, req.Reason, claims.UserID)
+	if req.StoreID != 0 && req.StoreID != *claims.StoreID {
+		c.Error(util.Forbidden(constants.MsgLossStoreMismatch,
+			fmt.Errorf("role[%s] create loss for store[%d], own store[%d]", claims.Role, req.StoreID, *claims.StoreID)))
+		return
+	}
+	order, err := h.lossSvc.Create(*claims.StoreID, req.SKUID, req.Quantity, req.Reason, claims.UserID)
 	if err != nil {
 		c.Error(fmt.Errorf("handler create loss order role[%s]: %w", claims.Role, err))
 		return
