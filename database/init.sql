@@ -90,6 +90,26 @@ CREATE TABLE IF NOT EXISTS stocktakes (
 );
 CREATE INDEX IF NOT EXISTS idx_stocktakes_store ON stocktakes(store_id);
 
+-- 库存报损单：店长提交 -> 总部/管理员审批；通过扣减库存并生成损耗出库记录，驳回需填原因。
+CREATE TABLE IF NOT EXISTS loss_orders (
+    id BIGSERIAL PRIMARY KEY,
+    store_id BIGINT NOT NULL,
+    sku_id BIGINT NOT NULL,
+    quantity INT NOT NULL,
+    reason VARCHAR(255) NOT NULL DEFAULT '',
+    status VARCHAR(16) NOT NULL DEFAULT 'pending',
+    applicant_id BIGINT,
+    reviewer_id BIGINT,
+    reject_reason VARCHAR(255) DEFAULT '',
+    reviewed_at TIMESTAMPTZ,
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_loss_orders_store ON loss_orders(store_id);
+CREATE INDEX IF NOT EXISTS idx_loss_orders_sku ON loss_orders(sku_id);
+CREATE INDEX IF NOT EXISTS idx_loss_orders_status ON loss_orders(status);
+CREATE INDEX IF NOT EXISTS idx_loss_orders_applicant ON loss_orders(applicant_id);
+
 -- ============ 种子数据 ============
 INSERT INTO stores (id, code, name, address) VALUES
     (1, 'ST001', '北京朝阳门店', '北京市朝阳区建国路 88 号'),
@@ -127,8 +147,14 @@ INSERT INTO stock_records (id, store_id, sku_id, record_type, quantity) VALUES
     (3, 1, 2, 'sale', 30)
 ON CONFLICT (id) DO NOTHING;
 
+-- 报损单种子：1 张待审核（朝阳门店-农夫山泉，库存 20 < 报损 30，演示库存不足审批失败保持待审核）
+INSERT INTO loss_orders (id, store_id, sku_id, quantity, reason, status, applicant_id) VALUES
+    (1, 1, 2, 30, '运输破损，瓶身渗漏无法销售', 'pending', 3)
+ON CONFLICT (id) DO NOTHING;
+
 SELECT setval('users_id_seq', GREATEST((SELECT MAX(id) FROM users), 1));
 SELECT setval('stores_id_seq', GREATEST((SELECT MAX(id) FROM stores), 1));
 SELECT setval('skus_id_seq', GREATEST((SELECT MAX(id) FROM skus), 1));
 SELECT setval('store_inventories_id_seq', GREATEST((SELECT MAX(id) FROM store_inventories), 1));
 SELECT setval('stock_records_id_seq', GREATEST((SELECT MAX(id) FROM stock_records), 1));
+SELECT setval('loss_orders_id_seq', GREATEST((SELECT MAX(id) FROM loss_orders), 1));

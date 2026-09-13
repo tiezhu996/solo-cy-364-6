@@ -57,6 +57,18 @@ func StockRecordTypeText(t constants.StockRecordType) string {
 	return "未知"
 }
 
+func LossOrderStatusText(s constants.LossOrderStatus) string {
+	switch s {
+	case constants.LossPending:
+		return "待审核"
+	case constants.LossApproved:
+		return "已通过"
+	case constants.LossRejected:
+		return "已驳回"
+	}
+	return "未知"
+}
+
 func UserRoleText(r constants.UserRole) string {
 	switch r {
 	case constants.RoleHQ:

@@ -19,6 +19,7 @@ const router = createRouter({
         { path: 'skus', name: 'skus', component: () => import('@/pages/Skus.vue'), meta: { title: 'SKU 主数据', roles: AdminRoles } },
         { path: 'inventory', name: 'inventory', component: () => import('@/pages/Inventory.vue'), meta: { title: '门店库存' } },
         { path: 'transfers', name: 'transfers', component: () => import('@/pages/Transfers.vue'), meta: { title: '调拨管理' } },
+        { path: 'loss-orders', name: 'loss-orders', component: () => import('@/pages/LossOrders.vue'), meta: { title: '库存报损' } },
         { path: 'records', name: 'records', component: () => import('@/pages/Records.vue'), meta: { title: '出入库与盘点' } },
         { path: 'analysis', name: 'analysis', component: () => import('@/pages/Analysis.vue'), meta: { title: '滞销分析与补货' } },
         { path: 'profile', name: 'profile', component: () => import('@/pages/Profile.vue'), meta: { title: '个人中心' } }

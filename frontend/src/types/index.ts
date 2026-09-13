@@ -1,6 +1,7 @@
 import type { UserRoleValue } from '@/constants/user'
 import type { TransferStatusValue } from '@/constants/transfer'
 import type { StockRecordTypeValue } from '@/constants/stockRecord'
+import type { LossOrderStatusValue } from '@/constants/lossOrder'
 
 export interface User {
   id: number
@@ -82,6 +83,24 @@ export interface Stocktake {
   actual_qty: number
   difference: number
   remark: string
+  created_at: string
+}
+
+export interface LossOrder {
+  id: number
+  store_id: number
+  store?: Store
+  sku_id: number
+  sku?: SKU
+  quantity: number
+  reason: string
+  status: LossOrderStatusValue
+  applicant_id: number | null
+  applicant?: User | null
+  reviewer_id: number | null
+  reviewer?: User | null
+  reject_reason: string
+  reviewed_at: string | null
   created_at: string
 }
 

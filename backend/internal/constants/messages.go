@@ -26,4 +26,11 @@ const (
 	MsgStocktakeSuccess       = "盘点完成，盘盈盘亏已计算"
 	MsgSafetyStockUpdated     = "安全库存已更新"
 	MsgInventoryLowWarning    = "存在低库存预警"
+	MsgLossCreateSuccess      = "报损单已提交，等待审核"
+	MsgLossApproveSuccess     = "报损单已通过，库存已扣减"
+	MsgLossRejectSuccess      = "报损单已驳回"
+	MsgLossConflict           = "报损单已处理，请勿重复审批"
+	MsgLossRejectReasonNeeded = "驳回必须填写驳回原因"
+	MsgLossStoreMismatch      = "店长只能提交本店的报损单"
+	MsgLossReasonNeeded       = "报损原因不能为空"
 )

@@ -85,6 +85,7 @@ func (r *Router) migrate() error {
 	if err := r.db.AutoMigrate(
 		&model.User{}, &model.Store{}, &model.SKU{}, &model.StoreInventory{},
 		&model.TransferOrder{}, &model.StockRecord{}, &model.Stocktake{},
+		&model.LossOrder{},
 	); err != nil {
 		return fmt.Errorf("auto migrate: %w", err)
 	}
@@ -116,6 +117,7 @@ func (r *Router) registerV1(v1 *gin.RouterGroup) {
 	invRepo := repository.NewStoreInventoryRepository(r.db)
 	transferRepo := repository.NewTransferOrderRepository(r.db)
 	recordRepo := repository.NewStockRecordRepository(r.db)
+	lossRepo := repository.NewLossOrderRepository(r.db)
 
 	userSvc := service.NewUserService(userRepo, r.logger, r.cfg.JWTSecret, r.cfg.TokenTTLHours)
 	storeSvc := service.NewStoreService(storeRepo, r.logger)
@@ -123,6 +125,7 @@ func (r *Router) registerV1(v1 *gin.RouterGroup) {
 	invSvc := service.NewStoreInventoryService(invRepo, skuRepo, r.db, r.logger)
 	recordSvc := service.NewStockRecordService(recordRepo, invRepo, storeRepo, skuRepo, invSvc, r.db, r.logger)
 	transferSvc := service.NewTransferOrderService(transferRepo, invSvc, recordSvc, r.db, r.logger)
+	lossSvc := service.NewLossOrderService(lossRepo, invSvc, recordSvc, r.db, r.logger)
 
 	userHandler := handler.NewUserHandler(userSvc)
 	storeHandler := handler.NewStoreHandler(storeSvc)
@@ -130,6 +133,7 @@ func (r *Router) registerV1(v1 *gin.RouterGroup) {
 	invHandler := handler.NewStoreInventoryHandler(invSvc)
 	transferHandler := handler.NewTransferOrderHandler(transferSvc)
 	recordHandler := handler.NewStockRecordHandler(recordSvc)
+	lossHandler := handler.NewLossOrderHandler(lossSvc)
 
 	auth := middleware.AuthRequired(r.cfg)
 	authLimiter := middleware.RateLimitStrict(r.cfg)
@@ -143,4 +147,5 @@ func (r *Router) registerV1(v1 *gin.RouterGroup) {
 	registerInventoryRoutes(v1, invHandler, auth, managerRoles)
 	registerTransferRoutes(v1, transferHandler, auth, managerRoles, authLimiter)
 	registerStockRecordRoutes(v1, recordHandler, auth, managerRoles)
+	registerLossOrderRoutes(v1, lossHandler, auth, managerRoles, authLimiter)
 }

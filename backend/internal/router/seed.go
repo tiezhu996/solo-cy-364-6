@@ -72,6 +72,22 @@ func seedData(db *gorm.DB, logger *slog.Logger) error {
 	if err := db.Create(&records).Error; err != nil {
 		return fmt.Errorf("seed stock records: %w", err)
 	}
+
+	// 报损单种子：待审核，报损数量大于当前库存，用于演示库存不足时审批失败保持待审核。
+	manager1ID := users[2].ID
+	lossOrders := []model.LossOrder{
+		{
+			StoreID:     stores[0].ID,
+			SKUID:       skus[1].ID,
+			Quantity:    30,
+			Reason:      "运输破损，瓶身渗漏无法销售",
+			Status:      constants.LossPending,
+			ApplicantID: &manager1ID,
+		},
+	}
+	if err := db.Create(&lossOrders).Error; err != nil {
+		return fmt.Errorf("seed loss orders: %w", err)
+	}
 	logger.Info("seed data created", "stores", len(stores), "users", len(users), "skus", len(skus))
 	return nil
 }

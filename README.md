@@ -27,6 +27,7 @@ docker compose up -d --build
 - 多门店 SKU 主数据统一维护与批量导入
 - 门店库存实时同步、安全库存阈值与低库存预警
 - 调拨申请 → 审批确认 → 发货 → 收货全流程状态机
+- **库存报损：店长提交本店报损单（数量+原因）→ 总部/管理员审批，每张单据仅处理一次；通过自动扣减库存并生成损耗出库记录（库存不足审批失败、单据保持待审核），驳回必填原因、库存不变；店长仅看本店、总部/管理员看全部门店**
 - 出入库明细（采购/调拨/销售/损耗）、周期盘点与盘盈盘亏计算
 - 滞销商品分析与智能补货建议报表
 - JWT 认证 + RBAC 角色权限（总部/店长/管理员）+ 接口限流
@@ -61,7 +62,7 @@ cy-364/
 │   ├── cmd/server/main.go
 │   └── internal/
 │       ├── config/       # 配置解析
-│       ├── model/        # 按实体分文件（user/store/sku/store_inventory/transfer_order/stock_record/stocktake）
+│       ├── model/        # 按实体分文件（user/store/sku/store_inventory/transfer_order/stock_record/stocktake/loss_order）
 │       ├── repository/   # 数据访问层
 │       ├── service/      # 业务逻辑层
 │       ├── handler/      # HTTP 接口层
@@ -72,11 +73,11 @@ cy-364/
 │       └── util/         # jwt/logger/formatters/app_error/replenish_calculator
 ├── frontend/
 │   └── src/
-│       ├── api/          # user/store/sku/storeInventory/transferOrder/stockRecord
+│       ├── api/          # user/store/sku/storeInventory/transferOrder/stockRecord/lossOrder
 │       ├── stores/       # authStore/userStore/inventoryStore/transferStore
-│       ├── components/common/  # InventoryStatusBadge/SkuTable/StockLevelIndicator/TransferStatusBadge/RecordTable/ReplenishSuggestionCard/RoleGuard
-│       ├── hooks/        # useAuth/useInventoryStats/useTransfers
-│       ├── pages/        # Dashboard/Skus/Inventory/Transfers/Records/Analysis/Profile/Login
+│       ├── components/common/  # InventoryStatusBadge/SkuTable/StockLevelIndicator/TransferStatusBadge/LossOrderStatusBadge/RecordTable/ReplenishSuggestionCard/RoleGuard
+│       ├── hooks/        # useAuth/useInventoryStats/useTransfers/useLossOrders
+│       ├── pages/        # Dashboard/Skus/Inventory/Transfers/LossOrders/Records/Analysis/Profile/Login
 │       ├── router/       # index.ts + guards.ts
 │       ├── utils/        # dateFormat/replenishCalculator/request
 │       └── constants/    # transfer/stockRecord/user/errorCodes
@@ -144,6 +145,11 @@ cy-364/
 | PUT | /api/v1/transfers/:id/ship | 发货并扣减调出库存 | 店长/管理员/总部 |
 | PUT | /api/v1/transfers/:id/receive | 收货并增加调入库存 | 店长/管理员/总部 |
 | PUT | /api/v1/transfers/:id/cancel | 取消调拨单 | 店长/管理员/总部 |
+| GET | /api/v1/loss-orders | 报损单分页列表（店长仅本店，总部/管理员全部门店） | 登录 |
+| GET | /api/v1/loss-orders/:id | 报损单详情 | 登录 |
+| POST | /api/v1/loss-orders | 店长提交本店报损单 | 店长/管理员/总部，严格限流 |
+| PUT | /api/v1/loss-orders/:id/approve | 审批通过：扣减库存并生成损耗出库记录 | 管理员/总部 |
+| PUT | /api/v1/loss-orders/:id/reject | 审批驳回（必填驳回原因，库存不变） | 管理员/总部 |
 | GET | /api/v1/records | 出入库记录分页列表 | 登录 |
 | GET | /api/v1/records/export | 导出出入库记录 | 登录 |
 | POST | /api/v1/records | 创建出入库记录并调整库存 | 店长/管理员/总部 |
@@ -163,9 +169,13 @@ cy-364/
 - 后端：`backend/internal/constants/stock_record.go`（定义 + Valid + StockDirection）、`backend/internal/model/stock_record.go`（GORM 模型）、`backend/internal/service/stock_record_service.go`、`backend/internal/handler/stock_record_handler.go`、`backend/internal/util/formatters.go`（类型文本）、`backend/internal/constants/log_templates.go`、`backend/internal/repository/stock_record_repository.go`
 - 前端：`frontend/src/constants/stockRecord.ts`（定义 + 文案 + 标签色）、`frontend/src/types/index.ts`、`frontend/src/components/common/RecordTable.vue`（明细展示）、`frontend/src/pages/Records.vue`（筛选与表单）、`frontend/src/api/stockRecord.ts`
 
+### LossOrderStatus（报损单状态）
+- 后端：`backend/internal/constants/loss_order.go`（定义 + Valid + LossOrderStatusFlow + CanLossTransition）、`backend/internal/model/loss_order.go`（GORM 模型）、`backend/internal/service/loss_order_service.go`（审批状态机/库存扣减/损耗出库）、`backend/internal/handler/loss_order_handler.go`（提交/通过/驳回接口）、`backend/internal/repository/loss_order_repository.go`（CAS 状态流转）、`backend/internal/router/loss_orders.go`（路由权限）、`backend/internal/util/formatters.go`（状态文本）、`backend/internal/constants/log_templates.go`（日志模板）、`backend/internal/constants/messages.go`（文案）
+- 前端：`frontend/src/constants/lossOrder.ts`（定义 + 文案 + 标签色 + 流转）、`frontend/src/types/index.ts`（类型）、`frontend/src/components/common/LossOrderStatusBadge.vue`（状态徽章）、`frontend/src/pages/LossOrders.vue`（按钮显隐与筛选）、`frontend/src/hooks/useLossOrders.ts`、`frontend/src/api/lossOrder.ts`、`frontend/src/router/index.ts`、`frontend/src/pages/Layout.vue`（菜单）
+
 ### UserRole（用户角色）
-- 后端：`backend/internal/constants/user.go`（定义 + Valid）、`backend/internal/model/user.go`（GORM 模型）、`backend/internal/middleware/rbac.go`（RBAC 校验）、`backend/internal/router/*.go`（路由权限）、`backend/internal/service/user_service.go`（注册默认角色）、`backend/internal/util/formatters.go`（角色文本）、`backend/internal/util/jwt.go`（JWT 声明）
-- 前端：`frontend/src/constants/user.ts`（定义 + 文案）、`frontend/src/types/index.ts`、`frontend/src/stores/authStore.ts`（角色状态）、`frontend/src/router/guards.ts`（路由守卫）、`frontend/src/components/common/RoleGuard.vue`（按钮/区域显隐）、`frontend/src/pages/Login.vue`、`frontend/src/pages/Layout.vue`（角色标签）
+- 后端：`backend/internal/constants/user.go`（定义 + Valid）、`backend/internal/model/user.go`（GORM 模型）、`backend/internal/middleware/rbac.go`（RBAC 校验）、`backend/internal/router/loss_orders.go` 与 `backend/internal/router/*.go`（路由权限）、`backend/internal/handler/loss_order_handler.go`（店长本店隔离）、`backend/internal/service/user_service.go`（注册默认角色）、`backend/internal/util/formatters.go`（角色文本）、`backend/internal/util/jwt.go`（JWT 声明）
+- 前端：`frontend/src/constants/user.ts`（定义 + 文案）、`frontend/src/types/index.ts`、`frontend/src/stores/authStore.ts`（角色状态）、`frontend/src/router/guards.ts`（路由守卫）、`frontend/src/components/common/RoleGuard.vue`（按钮/区域显隐）、`frontend/src/pages/LossOrders.vue`（审批/提交按钮显隐）、`frontend/src/pages/Login.vue`、`frontend/src/pages/Layout.vue`（角色标签）
 
 ## License
 

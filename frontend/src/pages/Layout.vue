@@ -7,6 +7,7 @@
         <el-menu-item index="/skus"><el-icon><Goods /></el-icon><span>SKU 主数据</span></el-menu-item>
         <el-menu-item index="/inventory"><el-icon><Box /></el-icon><span>门店库存</span></el-menu-item>
         <el-menu-item index="/transfers"><el-icon><Switch /></el-icon><span>调拨管理</span></el-menu-item>
+        <el-menu-item index="/loss-orders"><el-icon><Warning /></el-icon><span>库存报损</span></el-menu-item>
         <el-menu-item index="/records"><el-icon><Document /></el-icon><span>出入库与盘点</span></el-menu-item>
         <el-menu-item index="/analysis"><el-icon><DataAnalysis /></el-icon><span>滞销分析与补货</span></el-menu-item>
         <el-menu-item index="/profile"><el-icon><User /></el-icon><span>个人中心</span></el-menu-item>
